@@ -73,6 +73,14 @@ typedef struct {
 
   reno_state_t reno_state;
   pthread_mutex_t ack_lock;
+  uint32_t send_base;          // Numéro de séquence du plus ancien paquet non acquitté.
+  uint32_t next_seq_num;       // Prochain numéro de séquence à utiliser pour un nouveau paquet.
+  uint32_t effective_window_size; // Taille de la fenêtre (min(cwnd, advertised_window)).
+  // Pour CP2, utilisez une constante simple (WINDOW_SIZE_DEFAULT).
+
+// Timer de Retransmission (RTO)
+  int32_t retransmit_timeout;  // Délai d'attente avant retransmission (en ms).
+  struct timespec last_send_time; // L'heure (timestamp) où le paquet SendBase a été envoyé.
 } window_t;
 
 /**

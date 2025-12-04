@@ -37,6 +37,7 @@ typedef struct {
 #define ACK_FLAG_MASK 0x4
 #define FIN_FLAG_MASK 0x2
 #define IDENTIFIER 3120
+#define DATA_FLAG_MASK 0x01 // Exemple: Utilisation du bit 2 pour les paquets de données
 
 // Maximum Segment Size. Make sure to update this if your CCA requires extension
 // data for all packets, as this reduces the payload and thus the MSS.

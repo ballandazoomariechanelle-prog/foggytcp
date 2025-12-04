@@ -7,7 +7,9 @@ No part of the project may be copied and/or distributed without
 the express permission of the course staff. Everyone is prohibited 
 from releasing their forks in any public places. */
 
-/*modified by group 6*/
+
+
+/*modified by the 6th group*/
 
 #include <unistd.h>
 #include <fstream>
