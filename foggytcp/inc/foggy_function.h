@@ -1,10 +1,10 @@
 /* Copyright (C) 2024 Hong Kong University of Science and Technology
 
-This repository is used for the Computer Networks (ELEC 3120) 
-course taught at Hong Kong University of Science and Technology. 
+This repository is used for the Computer Networks (ELEC 3120)
+course taught at Hong Kong University of Science and Technology.
 
-No part of the project may be copied and/or distributed without 
-the express permission of the course staff. Everyone is prohibited 
+No part of the project may be copied and/or distributed without
+the express permission of the course staff. Everyone is prohibited
 from releasing their forks in any public places. */
 
 #include "foggy_tcp.h"
@@ -18,7 +18,7 @@ from releasing their forks in any public places. */
  * @param sock The socket used for handling packets received.
  * @param pkt The packet data received by the socket.
  */
-void on_recv_pkt(foggy_socket_t *sock, uint8_t *pkt);
+void on_recv_pkt(foggy_socket_t* sock, uint8_t* pkt);
 
 
 /**
@@ -30,22 +30,17 @@ void on_recv_pkt(foggy_socket_t *sock, uint8_t *pkt);
  * @param data The data to be sent.
  * @param buf_len The length of the data being sent.
  */
-void send_pkts(foggy_socket_t *sock, uint8_t *data, int buf_len);
+void send_pkts(foggy_socket_t* sock, uint8_t* data, int buf_len);
 
 /*<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<*/
 
-// Dans inc/foggy_function.h
-// ... (autres déclarations de fonctions) ...
+void add_receive_window(foggy_socket_t* sock, uint8_t* pkt);
 
-void retransmit_send_base(foggy_socket_t* sock);
+void process_receive_window(foggy_socket_t* sock);
 
-void add_receive_window(foggy_socket_t *sock, uint8_t *pkt);
+void transmit_send_window(foggy_socket_t* sock);
 
-void process_receive_window(foggy_socket_t *sock);
-
-void transmit_send_window(foggy_socket_t *sock);
-
-void receive_send_window(foggy_socket_t *sock);
+void receive_send_window(foggy_socket_t* sock);
 
 // Ajoutez ceci APRES le bloc des déclarations de fonctions existantes
 
