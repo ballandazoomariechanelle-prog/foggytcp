@@ -1,13 +1,13 @@
 /* Copyright (C) 2024 Hong Kong University of Science and Technology
 
-This repository is used for the Computer Networks (ELEC 3120) 
-course taught at Hong Kong University of Science and Technology. 
+This repository is used for the Computer Networks (ELEC 3120)
+course taught at Hong Kong University of Science and Technology.
 
-No part of the project may be copied and/or distributed without 
-the express permission of the course staff. Everyone is prohibited 
+No part of the project may be copied and/or distributed without
+the express permission of the course staff. Everyone is prohibited
 from releasing their forks in any public places. */
- 
- /*
+
+/*
  * This file implements the high-level API for foggy-TCP sockets.
  */
 
@@ -24,180 +24,197 @@ from releasing their forks in any public places. */
 #include "foggy_backend.h"
 
 void* foggy_socket(const foggy_socket_type_t socket_type,
-               const char *server_port, const char *server_ip) {
-  foggy_socket_t* sock = new foggy_socket_t;
-  int sockfd, optval;
-  socklen_t len;
-  struct sockaddr_in conn, my_addr;
-  len = sizeof(my_addr);
+	const char* server_port, const char* server_ip) {
+	foggy_socket_t* sock = new foggy_socket_t;
+	int sockfd, optval;
+	socklen_t len;
+	struct sockaddr_in conn, my_addr;
+	len = sizeof(my_addr);
 
-  sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-  if (sockfd < 0) {
-    perror("ERROR opening socket");
-    return NULL;
-  }
-  sock->socket = sockfd;
-  // sock->state = CLOSED;
-  sock->received_buf = NULL;
-  sock->received_len = 0;
-  pthread_mutex_init(&(sock->recv_lock), NULL);
+	sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+	if (sockfd < 0) {
+		perror("ERROR opening socket");
+		return NULL;
+	}
+	sock->socket = sockfd;
+	// sock->state = CLOSED;
+	sock->received_buf = NULL;
+	sock->received_len = 0;
+	pthread_mutex_init(&(sock->recv_lock), NULL);
 
-  sock->sending_buf = NULL;
-  sock->sending_len = 0;
-  pthread_mutex_init(&(sock->send_lock), NULL);
+	sock->sending_buf = NULL;
+	sock->sending_len = 0;
+	pthread_mutex_init(&(sock->send_lock), NULL);
 
-  sock->type = socket_type;
-  sock->dying = 0;
-  pthread_mutex_init(&(sock->death_lock), NULL);
+	sock->type = socket_type;
+	sock->dying = 0;
+	pthread_mutex_init(&(sock->death_lock), NULL);
 
-  // FIXME: Sequence numbers should be randomly initialized. The next expected
-  // sequence number should be initialized according to the SYN packet from the
-  // other side of the connection.
-  sock->window.last_byte_sent = 0;
-  sock->window.last_ack_received = 0;
-  sock->window.dup_ack_count = 0;
-  sock->window.next_seq_expected = 0;
-  sock->window.ssthresh = WINDOW_INITIAL_SSTHRESH;
-  sock->window.advertised_window = WINDOW_INITIAL_ADVERTISED;
-  sock->window.congestion_window = WINDOW_INITIAL_WINDOW_SIZE;
-  sock->window.reno_state = RENO_SLOW_START;
-  pthread_mutex_init(&(sock->window.ack_lock), NULL);
+	// FIXME: Sequence numbers should be randomly initialized. The next expected
+	// sequence number should be initialized according to the SYN packet from the
+	// other side of the connection.
+	sock->window.last_byte_sent = 0;
+	sock->window.last_ack_received = 0;
 
-  for (int i = 0; i < RECEIVE_WINDOW_SLOT_SIZE; ++i) {
-    sock->receive_window[i].is_used = 0;
-    sock->receive_window[i].msg = NULL;
-  }
+	// -------------------------------------------------------------------
+	// Initialisation pour TCP Reno (CP3) et GBN (CP2)
+	// -------------------------------------------------------------------
+	sock->window.dup_ack_count = 0;
+	sock->window.next_seq_expected = 0;
 
-  if (pthread_cond_init(&sock->wait_cond, NULL) != 0) {
-    perror("ERROR condition variable not set\n");
-    return NULL;
-  }
+	// TCP Reno Initialisation:
+	sock->window.ssthresh = WINDOW_INITIAL_SSTHRESH; // 64 * MSS par défaut
+	sock->window.advertised_window = WINDOW_INITIAL_ADVERTISED; // RWND initial
+	sock->window.congestion_window = MSS; // CWND commence à 1 MSS (Slow Start)
+	sock->window.reno_state = RENO_SLOW_START;
+	pthread_mutex_init(&(sock->window.ack_lock), NULL);
 
-  uint16_t portno = (uint16_t)atoi(server_port);
-  switch (socket_type) {
-    case TCP_INITIATOR:
-      if (server_ip == NULL) {
-        perror("ERROR server_ip NULL");
-        return NULL;
-      }
-      memset(&conn, 0, sizeof(conn));
-      
-      conn.sin_family = AF_INET;
-      conn.sin_addr.s_addr = inet_addr(server_ip);
-      conn.sin_port = htons(portno);
-      sock->conn = conn;
+	// GBN Initialisation:
+	sock->window.send_base = 0;
+	sock->window.next_seq_num = 0;
+	sock->window.effective_window_size = 0;
+	sock->window.retransmit_timeout = 0;
+	sock->window.last_send_time.tv_sec = 0;
+	sock->window.last_send_time.tv_nsec = 0;
+	// -------------------------------------------------------------------
 
-      my_addr.sin_family = AF_INET;
-      my_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-      my_addr.sin_port = 0;
-      if (bind(sockfd, (struct sockaddr *)&my_addr, sizeof(my_addr)) < 0) {
-        perror("ERROR on binding");
-        return NULL;
-      }
+	for (int i = 0; i < RECEIVE_WINDOW_SLOT_SIZE; ++i) {
+		sock->receive_window[i].is_used = 0;
+		sock->receive_window[i].msg = NULL;
+	}
 
-      break;
+	if (pthread_cond_init(&sock->wait_cond, NULL) != 0) {
+		perror("ERROR condition variable not set\n");
+		return NULL;
+	}
 
-    case TCP_LISTENER:
-      memset(&conn, 0, sizeof(conn));
-      conn.sin_family = AF_INET;
-      conn.sin_addr.s_addr = htonl(INADDR_ANY);
-      conn.sin_port = htons(portno);
+	uint16_t portno = (uint16_t)atoi(server_port);
+	switch (socket_type) {
+	case TCP_INITIATOR:
+		if (server_ip == NULL) {
+			perror("ERROR server_ip NULL");
+			return NULL;
+		}
+		memset(&conn, 0, sizeof(conn));
 
-      optval = 1;
-      setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, (const void *)&optval,
-                 sizeof(int));
-      if (bind(sockfd, (struct sockaddr *)&conn, sizeof(conn)) < 0) {
-        perror("ERROR on binding");
-        return NULL;
-      }
-      sock->conn = conn;
-      break;
+		conn.sin_family = AF_INET;
+		conn.sin_addr.s_addr = inet_addr(server_ip);
+		conn.sin_port = htons(portno);
+		sock->conn = conn;
 
-    default:
-      perror("Unknown Flag");
-      return NULL;
-  }
-  getsockname(sockfd, (struct sockaddr *)&my_addr, &len);
-  sock->my_port = ntohs(my_addr.sin_port);
+		my_addr.sin_family = AF_INET;
+		my_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+		my_addr.sin_port = 0;
+		if (bind(sockfd, (struct sockaddr*)&my_addr, sizeof(my_addr)) < 0) {
+			perror("ERROR on binding");
+			return NULL;
+		}
 
-  pthread_create(&(sock->thread_id), NULL, begin_backend, (void *)sock);
-  return (void*)sock;
+		break;
+
+	case TCP_LISTENER:
+		memset(&conn, 0, sizeof(conn));
+		conn.sin_family = AF_INET;
+		conn.sin_addr.s_addr = htonl(INADDR_ANY);
+		conn.sin_port = htons(portno);
+
+		optval = 1;
+		setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, (const void*)&optval,
+			sizeof(int));
+		if (bind(sockfd, (struct sockaddr*)&conn, sizeof(conn)) < 0) {
+			perror("ERROR on binding");
+			return NULL;
+		}
+		sock->conn = conn;
+		break;
+
+	default:
+		perror("Unknown Flag");
+		return NULL;
+	}
+	getsockname(sockfd, (struct sockaddr*)&my_addr, &len);
+	sock->my_port = ntohs(my_addr.sin_port);
+
+	pthread_create(&(sock->thread_id), NULL, begin_backend, (void*)sock);
+	return (void*)sock;
 }
 
-int foggy_close(void *in_sock) {
-  struct foggy_socket_t *sock = (struct foggy_socket_t *)in_sock;
-  while (pthread_mutex_lock(&(sock->death_lock)) != 0) {
-  }
-  sock->dying = 1;
-  pthread_mutex_unlock(&(sock->death_lock));
+int foggy_close(void* in_sock) {
+	struct foggy_socket_t* sock = (struct foggy_socket_t*)in_sock;
+	while (pthread_mutex_lock(&(sock->death_lock)) != 0) {
+	}
+	sock->dying = 1;
+	pthread_mutex_unlock(&(sock->death_lock));
 
-  pthread_join(sock->thread_id, NULL);
+	pthread_join(sock->thread_id, NULL);
 
-  if (sock != NULL) {
-    if (sock->received_buf != NULL) {
-      free(sock->received_buf);
-    }
-    if (sock->sending_buf != NULL) {
-      free(sock->sending_buf);
-    }
-  } else {
-    perror("ERROR null socket\n");
-    return EXIT_ERROR;
-  }
-  return close(sock->socket);
+	if (sock != NULL) {
+		if (sock->received_buf != NULL) {
+			free(sock->received_buf);
+		}
+		if (sock->sending_buf != NULL) {
+			free(sock->sending_buf);
+		}
+	}
+	else {
+		perror("ERROR null socket\n");
+		return EXIT_ERROR;
+	}
+	return close(sock->socket);
 }
 
-int foggy_read(void* in_sock, void *buf, int length) {
-  struct foggy_socket_t *sock = (struct foggy_socket_t *)in_sock;  
-  uint8_t *new_buf;
-  int read_len = 0;
+int foggy_read(void* in_sock, void* buf, int length) {
+	struct foggy_socket_t* sock = (struct foggy_socket_t*)in_sock;
+	uint8_t* new_buf;
+	int read_len = 0;
 
-  if (length < 0) {
-    perror("ERROR negative length");
-    return EXIT_ERROR;
-  }
+	if (length < 0) {
+		perror("ERROR negative length");
+		return EXIT_ERROR;
+	}
 
-  while (pthread_mutex_lock(&(sock->recv_lock)) != 0) {
-  }
+	while (pthread_mutex_lock(&(sock->recv_lock)) != 0) {
+	}
 
-  while (sock->received_len == 0) {
-    pthread_cond_wait(&(sock->wait_cond), &(sock->recv_lock));
-  }
-  if (sock->received_len > 0) {
-    if (sock->received_len > length)
-      read_len = length;
-    else
-      read_len = sock->received_len;
+	while (sock->received_len == 0) {
+		pthread_cond_wait(&(sock->wait_cond), &(sock->recv_lock));
+	}
+	if (sock->received_len > 0) {
+		if (sock->received_len > length)
+			read_len = length;
+		else
+			read_len = sock->received_len;
 
-    memcpy(buf, sock->received_buf, read_len);
-    if (read_len < sock->received_len) {
-      new_buf = (uint8_t*) malloc(sock->received_len - read_len);
-      memcpy(new_buf, sock->received_buf + read_len,
-              sock->received_len - read_len);
-      free(sock->received_buf);
-      sock->received_len -= read_len;
-      sock->received_buf = new_buf;
-    } else {
-      free(sock->received_buf);
-      sock->received_buf = NULL;
-      sock->received_len = 0;
-    }
-  }
-  pthread_mutex_unlock(&(sock->recv_lock));
-  return read_len;
+		memcpy(buf, sock->received_buf, read_len);
+		if (read_len < sock->received_len) {
+			new_buf = (uint8_t*)malloc(sock->received_len - read_len);
+			memcpy(new_buf, sock->received_buf + read_len,
+				sock->received_len - read_len);
+			free(sock->received_buf);
+			sock->received_len -= read_len;
+			sock->received_buf = new_buf;
+		}
+		else {
+			free(sock->received_buf);
+			sock->received_buf = NULL;
+			sock->received_len = 0;
+		}
+	}
+	pthread_mutex_unlock(&(sock->recv_lock));
+	return read_len;
 }
 
-int foggy_write(void *in_sock, const void *buf, int length) {
-  struct foggy_socket_t *sock = (struct foggy_socket_t *)in_sock;
-  while (pthread_mutex_lock(&(sock->send_lock)) != 0) {
-  }
-  if (sock->sending_buf == NULL)
-    sock->sending_buf = (uint8_t*) malloc(length);
-  else
-    sock->sending_buf = (uint8_t*) realloc(sock->sending_buf, length + sock->sending_len);
-  memcpy(sock->sending_buf + sock->sending_len, buf, length);
-  sock->sending_len += length;
+int foggy_write(void* in_sock, const void* buf, int length) {
+	struct foggy_socket_t* sock = (struct foggy_socket_t*)in_sock;
+	while (pthread_mutex_lock(&(sock->send_lock)) != 0) {
+	}
+	if (sock->sending_buf == NULL)
+		sock->sending_buf = (uint8_t*)malloc(length);
+	else
+		sock->sending_buf = (uint8_t*)realloc(sock->sending_buf, length + sock->sending_len);
+	memcpy(sock->sending_buf + sock->sending_len, buf, length);
+	sock->sending_len += length;
 
-  pthread_mutex_unlock(&(sock->send_lock));
-  return EXIT_SUCCESS;
+	pthread_mutex_unlock(&(sock->send_lock));
+	return EXIT_SUCCESS;
 }

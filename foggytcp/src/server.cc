@@ -9,6 +9,7 @@
  * forks in any public places.
  */
 
+ /*modified by the 6th group*/
 #include <fstream>
 #include <iostream>
 #include <cstring>

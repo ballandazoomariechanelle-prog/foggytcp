@@ -34,6 +34,11 @@ void send_pkts(foggy_socket_t *sock, uint8_t *data, int buf_len);
 
 /*<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<*/
 
+// Dans inc/foggy_function.h
+// ... (autres déclarations de fonctions) ...
+
+void retransmit_send_base(foggy_socket_t* sock);
+
 void add_receive_window(foggy_socket_t *sock, uint8_t *pkt);
 
 void process_receive_window(foggy_socket_t *sock);
@@ -41,3 +46,22 @@ void process_receive_window(foggy_socket_t *sock);
 void transmit_send_window(foggy_socket_t *sock);
 
 void receive_send_window(foggy_socket_t *sock);
+
+// Ajoutez ceci APRES le bloc des déclarations de fonctions existantes
+
+// Constantes pour la Fenêtre Glissante
+#define WINDOW_SIZE_DEFAULT 10      // Taille initiale de la fenêtre en nombre de segments
+#define RTO_INITIAL 500             // Retransmission Timeout initial en ms (par exemple 500 ms)
+
+// Macros pour la comparaison de numéros de séquence (essentiel pour l'enroulement)
+#define SEQ_LT(a, b) ((int32_t)((a) - (b)) < 0)
+#define SEQ_LE(a, b) ((int32_t)((a) - (b)) <= 0)
+#define after(a, b) SEQ_LT(b, a)
+#define before(a, b) SEQ_LT(a, b)
+#define before_or_equal(a, b) SEQ_LE(a, b)
+
+// Déclarations des fonctions de gestion du Timer (utilisées par foggy_function.cc)
+// Ces fonctions doivent être implémentées dans foggy_backend.cc, mais déclarées ici.
+void start_retransmit_timer(foggy_socket_t* sock);
+void stop_retransmit_timer(foggy_socket_t* sock);
+void on_retransmit_timer(foggy_socket_t* sock);
